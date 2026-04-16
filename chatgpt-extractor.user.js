@@ -17,6 +17,8 @@
     // ---------- Config ----------
     const BUTTON_ID = 'chatgpt-extractor-btn';
     const API_BASE = '/backend-api/conversation';
+    const RATE_LIMIT_MS = 5000; // min ms between exports
+    let lastExportTime = 0;
 
     // ---------- UI ----------
     function injectButton() {
@@ -63,10 +65,20 @@
         return match ? match[1] : null;
     }
 
+    async function getAuthToken() {
+        const res = await fetch('https://chatgpt.com/api/auth/session', { credentials: 'include' });
+        if (!res.ok) throw new Error('Could not fetch session. Are you logged in?');
+        const data = await res.json();
+        return data.accessToken || null;
+    }
+
     async function fetchConversation(id) {
+        const token = await getAuthToken();
+        const headers = { 'Accept': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         const res = await fetch(`${API_BASE}/${id}`, {
             credentials: 'include',
-            headers: { 'Accept': 'application/json' },
+            headers,
         });
         if (!res.ok) {
             throw new Error(`API returned ${res.status}. Are you logged in and on a conversation page?`);
@@ -164,6 +176,13 @@
     }
 
     async function onExportClick() {
+        const now = Date.now();
+        if (now - lastExportTime < RATE_LIMIT_MS) {
+            const wait = Math.ceil((RATE_LIMIT_MS - (now - lastExportTime)) / 1000);
+            alert(`Please wait ${wait}s before exporting again.`);
+            return;
+        }
+
         const id = getConversationId();
         if (!id) {
             alert('No conversation detected. Open a conversation first (URL must contain /c/<id>).');
@@ -191,6 +210,7 @@
             download(`${base}.json`, JSON.stringify(jsonPayload, null, 2), 'application/json');
             download(`${base}.md`, toMarkdown(meta, messages), 'text/markdown');
 
+            lastExportTime = Date.now();
             setButtonState('✅ Done', false);
             setTimeout(() => setButtonState('⬇ Export', false), 2000);
         } catch (err) {
